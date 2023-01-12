@@ -4236,44 +4236,13 @@ var buildfire = {
 				if (!strings || !Object.keys(strings).length) {
 					return;
 				}
-				document.querySelectorAll("*[bfString], *[bfString-attrs]").forEach(e => {
-					if (!e.getAttribute("bfString")) {
-						return;
-					}
-					const stringKeys = e.getAttribute("bfString").split(".");
-					const section = stringKeys[0];
-					const label = stringKeys[1];
-					if (!strings[section]) {
-						return;
-					}
-					const valueObj = strings[section][label];
-					const injectAttributes = e.getAttribute("bfString-attrs");
-					let attributes;
-					//handle multiple attributes.
-					if (injectAttributes) {
-						attributes = injectAttributes.split(",");
-					}
-					if (valueObj && valueObj.hasOwnProperty("value")) {
-						if (attributes && attributes.length) {
-							attributes.forEach(attr => e.setAttribute(attr, valueObj.value));
-						} else {
-							e.innerHTML = valueObj.value;
-						}
-					} else if (valueObj && valueObj.hasOwnProperty("defaultValue")) {
-						if (attributes && attributes.length) {
-							attributes.forEach(attr => e.setAttribute(attr, valueObj.defaultValue));
-						} else {
-							e.innerHTML = valueObj.defaultValue;
-						}
-					}
-
+				document.querySelectorAll("*[bfString]").forEach(e => {
+					buildfire.language._handleNode(e);
 					//trigger on string injected to this element.
 					buildfire.eventManager.trigger('languageSettingsOnStringsInjected', e);
 					buildfire.eventManager.trigger('_languageSettingsOnStringsInjected', e);
-					buildfire.language.watch();
 				});
-
-
+				buildfire.language.watch();
 			};
 			
 			//merge updated default strings into datastore strings.
@@ -4339,10 +4308,9 @@ var buildfire = {
 
 			init();
 
-			buildfire.language.onUpdate((data)=>{
-				if (data.tag === languageTag) {
-					_handleDataStoreLanguageSettingsResponse(data);
-				}
+			buildfire.language._onUpdate((data)=>{
+				window.location.reload(); //reload frame to update strings for non-bfString html elements in widget.
+				// _handleDataStoreLanguageSettingsResponse(data);
 			}, true);
 		}
 		,
@@ -4404,58 +4372,26 @@ var buildfire = {
 		}
 		,
 		watch: function () {
-
-			const targetNode = document.body;
-
-			// Options for the observer (which mutations to observe)
-			const config = { childList: true, subtree: true };
-
-			const handleAddedNode = (node) => {
-				if (!node.tagName) {// not an element
-					return;
-				}  
-				if (!node.hasAttribute("bfString")) {
-					return;
-				}
-				//check if this element got bfString value already
-				if (node.hasAttribute("bfString-initialized")) {
-					return;
-				}
-				const injectAttributes = node.getAttribute("bfString-attrs");
-				let attributes;
-				//handle multiple attributes.
-				if (injectAttributes) {
-					attributes = injectAttributes.split(",");
-				}
-				const stringKey = node.getAttribute("bfString");
-				buildfire.language.get({stringKey}, (err, string) => {
-					//inject the string into the element.
-					if (string) {
-						if (attributes && attributes.length) {
-							attributes.forEach(attr => node.setAttribute(attr, string));
-						} else {
-							node.innerHTML = string;
-						}
-						//mark initialized elements.
-						node.setAttribute("bfString-initialized", "");
-					}
-				});
-			};
-
+			
 			// Callback function to execute when mutations are observed
 			const callback = (mutationList, observer) => {
 				for (const mutation of mutationList) {
-					if (mutation.type === 'childList') {
-						Array.from( mutation.addedNodes).map( node => {
-							handleAddedNode(node);
-						});
+					if (mutation.type === 'childList' && mutation.target) {
+						buildfire.language._handleNode(mutation.target);
+						let childList = mutation.target.querySelectorAll("*[bfString]");
+						for (let i = 0; i < childList.length; i++) {
+							buildfire.language._handleNode(childList[i]);
 						}
+					}
 				}
 			};
 
+			const targetNode = document.body;
+			// Options for the observer (which mutations to observe)
+			// attributes should be false >> performance issues
+			const config = { childList: true, subtree: true, attributes: false };
 			// Create an observer instance linked to the callback function
 			const observer = new MutationObserver(callback);
-
 			// Start observing the target node for configured mutations
 			observer.observe(targetNode, config);
 		}
@@ -4466,8 +4402,44 @@ var buildfire = {
 		, onUpdate: function (callback, allowMultipleHandlers) {
 			return buildfire.eventManager.add('languageSettingsOnUpdate', callback, allowMultipleHandlers);
 		}
+		, _onUpdate: function (callback, allowMultipleHandlers) {
+			return buildfire.eventManager.add('_languageSettingsOnUpdate', callback, allowMultipleHandlers);
+		}
 		, triggerOnUpdate: function (obj) {
+			buildfire.eventManager.trigger('_languageSettingsOnUpdate', obj);
 			buildfire.eventManager.trigger('languageSettingsOnUpdate', obj);
+		}
+		,
+		_handleNode: function (node) { //inject strings for [bfString] elements. 
+			if (!node.tagName) {// not an element
+				return;
+			}  
+			if (!node.hasAttribute("bfString")) {
+				return;
+			}
+			//check if this element got bfString value already
+			if (node.hasAttribute("bfString-initialized")) {
+				return;
+			}
+			const injectAttributes = node.getAttribute("bfString-attrs");
+			let attributes;
+			//handle multiple attributes.
+			if (injectAttributes) {
+				attributes = injectAttributes.split(",");
+			}
+			const stringKey = node.getAttribute("bfString");
+			buildfire.language.get({stringKey}, (err, string) => {
+				//inject the string into the element.
+				if (string) {
+					if (attributes && attributes.length) {
+						attributes.forEach(attr => node.setAttribute(attr, string));
+					} else {
+						node.innerHTML = string;
+					}
+					//mark initialized elements.
+					node.setAttribute("bfString-initialized", "");
+				}
+			});
 		}
 		,
 		onPluginLanguageJsLoaded: function (pluginLanguageJson) {
